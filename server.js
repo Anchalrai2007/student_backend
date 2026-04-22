@@ -12,90 +12,142 @@ app.use(cors());
 /* ===== MongoDB ===== */
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.log(err));
+  .catch(err => console.log("DB ERROR:", err));
 
 /* ===== Model ===== */
-const Student = mongoose.model("Student", {
-  name: String,
-  email: { type: String, unique: true },
-  password: String,
+const studentSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, unique: true, required: true },
+  password: { type: String, required: true },
   course: String
 });
+
+const Student = mongoose.model("Student", studentSchema);
 
 /* ===== Auth Middleware ===== */
 const auth = (req, res, next) => {
   const token = req.headers.authorization;
-  if (!token) return res.status(401).json("No Token");
+  if (!token) return res.status(401).json({ message: "No Token" });
 
   try {
     const decoded = jwt.verify(token.split(" ")[1], process.env.JWT_SECRET);
     req.user = decoded.id;
     next();
   } catch {
-    res.status(400).json("Invalid Token");
+    res.status(400).json({ message: "Invalid Token" });
   }
 };
 
 /* ===== Routes ===== */
 
-// Register
+// ✅ Register (FIXED)
 app.post("/api/register", async (req, res) => {
-  const { name, email, password, course } = req.body;
+  try {
+    console.log("BODY:", req.body); // debug
 
-  const exist = await Student.findOne({ email });
-  if (exist) return res.status(400).json("Email already exists");
+    const { name, email, password, course } = req.body;
 
-  const hash = await bcrypt.hash(password, 10);
-  await Student.create({ name, email, password: hash, course });
+    // validation
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "All fields required" });
+    }
 
-  res.json("Registered Successfully");
+    // check duplicate
+    const exist = await Student.findOne({ email });
+    if (exist) {
+      return res.status(400).json({ message: "Email already exists" });
+    }
+
+    // hash password
+    const hash = await bcrypt.hash(password, 10);
+
+    // create user
+    await Student.create({
+      name,
+      email,
+      password: hash,
+      course
+    });
+
+    res.status(201).json({ message: "Registered Successfully" });
+
+  } catch (err) {
+    console.error("REGISTER ERROR:", err);
+    res.status(500).json({ message: "Server Error", error: err.message });
+  }
 });
 
-// Login
+// ✅ Login (FIXED)
 app.post("/api/login", async (req, res) => {
-  const { email, password } = req.body;
+  try {
+    const { email, password } = req.body;
 
-  const user = await Student.findOne({ email });
-  if (!user) return res.status(400).json("Invalid Credentials");
+    const user = await Student.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: "Invalid Credentials" });
+    }
 
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(400).json("Invalid Credentials");
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      return res.status(400).json({ message: "Invalid Credentials" });
+    }
 
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET);
 
-  res.json({ token });
+    res.json({ token });
+
+  } catch (err) {
+    console.error("LOGIN ERROR:", err);
+    res.status(500).json({ message: "Server Error" });
+  }
 });
 
-// Dashboard
+// ✅ Dashboard
 app.get("/api/dashboard", auth, async (req, res) => {
-  const user = await Student.findById(req.user).select("-password");
-  res.json(user);
+  try {
+    const user = await Student.findById(req.user).select("-password");
+    res.json(user);
+  } catch {
+    res.status(500).json({ message: "Server Error" });
+  }
 });
 
-// Update Password
+// ✅ Update Password
 app.put("/api/update-password", auth, async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
+  try {
+    const { oldPassword, newPassword } = req.body;
 
-  const user = await Student.findById(req.user);
+    const user = await Student.findById(req.user);
 
-  const match = await bcrypt.compare(oldPassword, user.password);
-  if (!match) return res.status(400).json("Wrong old password");
+    const match = await bcrypt.compare(oldPassword, user.password);
+    if (!match) {
+      return res.status(400).json({ message: "Wrong old password" });
+    }
 
-  user.password = await bcrypt.hash(newPassword, 10);
-  await user.save();
+    user.password = await bcrypt.hash(newPassword, 10);
+    await user.save();
 
-  res.json("Password Updated");
+    res.json({ message: "Password Updated" });
+
+  } catch {
+    res.status(500).json({ message: "Server Error" });
+  }
 });
 
-// Update Course
+// ✅ Update Course
 app.put("/api/update-course", auth, async (req, res) => {
-  const user = await Student.findByIdAndUpdate(
-    req.user,
-    { course: req.body.course },
-    { new: true }
-  );
+  try {
+    const user = await Student.findByIdAndUpdate(
+      req.user,
+      { course: req.body.course },
+      { new: true }
+    );
 
-  res.json(user);
+    res.json(user);
+
+  } catch {
+    res.status(500).json({ message: "Server Error" });
+  }
 });
 
 /* ===== Server ===== */
